@@ -681,7 +681,9 @@ export function autoModeFlagForProvider(provider: AgentProvider): string {
  *  renderer step, so without this it got neither the flag nor any equivalent,
  *  leaving it in an ask-first posture no one could ever answer. */
 export function argsWithAutoModeFlag(args: string[], autoMode: boolean, provider: AgentProvider): string[] {
-  if (!autoMode) return args;
+  // An omitted flag inherits the CLI user's default, which may be auto.
+  if (!autoMode) return provider === 'claude' && !hasAutoModeStance(args, provider)
+    ? [...args, '--permission-mode', 'default'] : args;
   const flag = autoModeFlagForProvider(provider);
   if (!flag) return args;
   if (hasAutoModeStance(args, provider)) return args;
@@ -696,7 +698,7 @@ export function hasAutoModeStance(args: string[], provider: AgentProvider): bool
   const flag = preset.autoModeFlag ?? '';
   const lead = flag.trim().split(/\s+/)[0];
   const stance = new Set([...(lead ? [lead] : []), ...(preset.autoStanceTokens ?? [])]);
-  return args.some((a) => stance.has(a));
+  return args.some((a) => stance.has(a.split('=')[0]));
 }
 
 /** Returns any env vars the provider needs for non-interactive / first-run suppression. */

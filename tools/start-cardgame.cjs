@@ -28,6 +28,9 @@ if (!fs.existsSync(instructions)) {
 }
 const claudeFile = path.join(hive, 'CLAUDE.md');
 if (!fs.existsSync(claudeFile)) fs.writeFileSync(claudeFile, '@AGENTS.md\n');
+const workflowImport = '@' + path.join(repo, 'docs', 'CARDGAME_WORKFLOW.md').replace(/\\/g, '/');
+const currentInstructions = fs.readFileSync(claudeFile, 'utf8');
+if (!currentInstructions.includes(workflowImport)) fs.appendFileSync(claudeFile, `\n${workflowImport}\n`);
 console.log(`CardGame profile: ${profile}`);
 if (process.argv.includes('--prepare-only')) process.exit(0);
 const env = { ...process.env };

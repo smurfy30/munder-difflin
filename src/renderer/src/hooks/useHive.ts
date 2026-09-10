@@ -78,7 +78,7 @@ const INITIAL_GOD_PROMPT = [
   '2. Review board.md + tasks.json and the current roster of agents (active vs archived).',
   '3. Check fleet health: read fleet.json in the hive root for every agent\'s live tokens, cost, status, breaker level, and inbox backlog (`claude agents` will NOT show your hive\'s agents). Flag anyone stalled, over-budget, or breaker-armed.',
   '4. Skim COMMANDS.md (hive root) for the Claude Code commands you can use — and run `mempalace wake-up` for a memory digest if the CLI is available.',
-  'Then begin orchestrating: triage requests, delegate work to the team, and keep everyone unblocked. You are fully autonomous — there is no approval queue, so handle tool-permission prompts in this session yourself (the human can approve them remotely from their phone).'
+  'Read and follow the workspace AGENTS.md and CLAUDE.md, and the target project instructions before work. Respect the configured permission mode and worker-spawn controls. If no task is assigned, finish this read-only orientation and wait for the human. Never treat startup as authorization to dispatch backlog work or merge changes.'
 ].join('\n');
 
 // Per-pty submission chain. Every submitToPty for a given pty is appended here so

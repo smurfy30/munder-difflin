@@ -33,6 +33,29 @@ retain the upstream rebuild. `test:native` exercises a real Windows PTY and SQLi
 
 ## First Lanes connection
 
+The **CardGame** tab now shows project-filtered Lanes runs, workflow stages and blocked
+gates, verification evidence, accepted reviews, merge records, and worker branch/worktree/log
+paths. It refreshes every 30 seconds while mounted and has a manual refresh button.
+Stored records are explicitly distinguished from live process health; read failures remove
+the old view and show unknown availability. Completed/archived runs are available through a filter.
+
+**New development task** saves directly to Lanes through its existing control API, with
+auto-dispatch forced off. The operation cannot dispatch, change another project, transition
+work, approve reviews, or merge. Retry keys prevent duplicate runs. Form contents and the
+retry key survive tab changes and restarts in the local profile. Scope is repository-relative.
+
+The original bridge dropped the `project` field and used `title` instead of Lanes' `goal`.
+That is corrected: all of the existing CardGame runs now retain attribution, titles, and
+evidence. The initial agent claim that none of those runs referenced CardGame was invalid.
+
+With auto mode off, Claude now receives `--permission-mode default` unless the individual
+agent explicitly specifies another posture. Previously omitting the flag inherited the
+CLI's global auto setting. Startup instructions also require read-only orientation and
+waiting for a task, rather than asserting unconditional autonomy.
+
+The launcher adds a reference to [the development workflow](CARDGAME_WORKFLOW.md) in
+the local office's CLAUDE.md while preserving existing instructions.
+
 `npm run lanes:status` reads the existing installation at `E:/projects/lanes`.
 Override `LANES_ROOT` and `LANES_CONFIG` for another installation/configuration.
 It reuses Lanes' config loader and workflow definitions, then reads its durable ledger
@@ -55,7 +78,7 @@ performance remains a separate follow-up.
 
 | Capability | Existing Lanes source | Suggested next step |
 | --- | --- | --- |
-| Explicit workflow stages and gates | `src/workflows.ts`, `src/runs.ts` | First add a read-only Lanes panel to Munder, showing stage and blocked gates with source IDs. |
+| Explicit workflow stages and gates | `src/workflows.ts`, `src/runs.ts` | Now visible in the CardGame panel; next add guarded transition requests through Lanes. |
 | Verification, review acceptance, and observed merge as separate facts | `src/runs.ts`, `src/git.ts` | Preserve these distinctions before allowing any board action to change a Lanes task. |
 | File ownership, dependencies, resource leases | `src/scopes.ts`, `src/dispatcher.ts`, `src/ledger.ts` | Route dispatch through Lanes initially; enforce checks at execution time, not only in prompts. |
 | Quota reserve, cooldown, model selection, reviewer separation | `src/scheduler.ts`, `src/usage.ts` | Reuse the scheduling service after the basic task loop works; avoid copying provider credential handling. |
@@ -68,6 +91,14 @@ package. The desktop UI, PTYs, office visualization, and basic worktree support 
 exist in Munder and do not need to be rebuilt from Lanes.
 
 ## Verification of this setup
+
+- Integration/permission regression tests: 11 passed, including real Lanes modules with
+  isolated temporary state, cross-project filtering, gate explanations, corruption recovery,
+  idempotent draft retries, and no worker launch.
+- The live CardGame tab displayed existing records and saved a non-dispatched pilot draft.
+- The restarted Claude process was observed with `--permission-mode default`.
+- Provider/launch regression checks: 22 passed. Live UI checks confirmed saved-run and
+  unsubmitted-form recovery after a full app restart, and no page horizontal overflow.
 
 - Production build and both TypeScript checks passed.
 - Windows native smoke test passed: SQLite `select 1` and a real PTY echo.

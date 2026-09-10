@@ -34,7 +34,14 @@ test('a main-only spawn (ephemeral worker, voice hire) gets the bypass flag when
 });
 
 test('autoMode off leaves a main-only spawn in the same ask-first posture as a GUI hire', () => {
-  assert.deepEqual(argsWithAutoModeFlag([], false, 'claude'), []);
+  assert.deepEqual(argsWithAutoModeFlag([], false, 'claude'), ['--permission-mode', 'default']);
+});
+
+test('explicit per-agent postures including equals syntax remain authoritative', () => {
+  for (const args of [['--permission-mode', 'plan'], ['--permission-mode=default']]) {
+    assert.deepEqual(argsWithAutoModeFlag(args, false, 'claude'), args);
+    assert.deepEqual(argsWithAutoModeFlag(args, true, 'claude'), args);
+  }
 });
 
 test('a GUI hire\'s args (already tokenized from buildSpawnCommand) are left untouched, not duplicated', () => {

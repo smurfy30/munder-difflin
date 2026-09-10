@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
+import type { LanesResult, LanesDraft, LanesDraftResult } from '../shared/lanes';
 import type { AgentProvider } from '../shared/agentProvider';
 import type { HireManifest } from '../shared/hire';
 export type { HireManifest } from '../shared/hire';
@@ -565,6 +566,8 @@ export interface PreservedWorktreeSnapshot {
 }
 
 const api = {
+  lanesSnapshot: (): Promise<LanesResult> => ipcRenderer.invoke('lanes:snapshot'),
+  lanesCreateDraft: (input: LanesDraft): Promise<LanesDraftResult> => ipcRenderer.invoke('lanes:createDraft', input),
   version: __APP_VERSION__,
 
   // ─── Analytics ───────────────────────────────────────────────────────────
