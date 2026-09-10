@@ -62,7 +62,7 @@ export function TaskDetailOverlay() {
     const god = st.agents.find((a) => a.isGod);
     if (god) st.select(god.id);
     const desc = task.description?.trim() ? task.description.trim() : '(no description)';
-    st.requestDispatchSeed(`Task: ${task.title}\nContext: ${desc}\n`);
+    st.requestDispatchSeed(`Work on existing office task ${task.id}: ${task.title}\nContext: ${desc}\nKeep this task ID; do not create a duplicate. Set its assignee to the actual employee ID and update its status as work progresses. Follow the project instructions. If human input is needed, set blocked and append the question to this task's humanQA for Ask Me.\n`);
     st.requestCommandCenterTab('floor');
     closeTaskDetail();
   };

@@ -15,7 +15,7 @@ if (!fs.existsSync(configFile)) {
   fs.writeFileSync(configFile, JSON.stringify({
     onboardingComplete: true, audience: 'technical', harnessHome: hive,
     recentHives: [hive], registeredRepos: [project], autoMode: false,
-    orchestratorMaySpawn: false, maxConcurrentWorkers: 1,
+    orchestratorMaySpawn: true, maxConcurrentWorkers: 1,
     defaultCommand: 'claude', godProvider: 'claude', godModel: 'sonnet', defaultModel: 'sonnet',
     missions: [], opsStandupSeeded: true, heartbeatSeeded: true, compactMaintenanceSeeded: true,
     semanticMemory: false, telemetryEnabled: false, autoUpdate: false, reflectEnabled: false,
@@ -28,7 +28,27 @@ if (!fs.existsSync(instructions)) {
 }
 const claudeFile = path.join(hive, 'CLAUDE.md');
 if (!fs.existsSync(claudeFile)) fs.writeFileSync(claudeFile, '@AGENTS.md\n');
-const workflowImport = '@' + path.join(repo, 'docs', 'CARDGAME_WORKFLOW.md').replace(/\\/g, '/');
+// Explicit migration preserves other profile settings and refuses to activate stale hires.
+if (process.argv.includes('--native-office')) {
+  const queue = path.join(hive, 'hive', 'spawn-requests');
+  if (fs.existsSync(queue) && fs.readdirSync(queue).some(name => name.endsWith('.json'))) {
+    throw new Error('Pending employee requests exist. Review them before enabling native hiring.');
+  }
+  const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+  fs.writeFileSync(configFile, JSON.stringify({ ...config, orchestratorMaySpawn: true, maxConcurrentWorkers: 1 }, null, 2));
+}
+const oldInstructions = fs.readFileSync(instructions, 'utf8');
+const nativeInstructions = oldInstructions
+  .replace('Questions requiring Shane belong in the project\'s docs/decisions-needed.md per its instructions.', 'Questions for office tasks belong in native humanQA / Ask Me; link lasting design decisions to repository notes.')
+  .replace('The office task board is a view, not a replacement for the Lanes ledger yet.', 'The native office task board is authoritative for new work assigned here. Use native employee sessions; Lanes is for legacy work and overlap checks.');
+if (nativeInstructions !== oldInstructions) fs.writeFileSync(instructions, nativeInstructions);
+const legacyImport = '@' + path.join(repo, 'docs', 'CARDGAME_WORKFLOW.md').replace(/\\/g, '/');
+const previousNativeImport = '@' + path.join(repo, 'docs', 'CARDGAME_NATIVE_OFFICE.md').replace(/\\/g, '/');
+fs.copyFileSync(path.join(repo, 'docs', 'CARDGAME_NATIVE_OFFICE.md'), path.join(hive, 'CARDGAME_NATIVE_OFFICE.md'));
+const workflowImport = '@CARDGAME_NATIVE_OFFICE.md';
+const previousClaude = fs.readFileSync(claudeFile, 'utf8');
+const migratedClaude = previousClaude.replace(legacyImport, workflowImport).replace(previousNativeImport, workflowImport);
+if (migratedClaude !== previousClaude) fs.writeFileSync(claudeFile, migratedClaude);
 const currentInstructions = fs.readFileSync(claudeFile, 'utf8');
 if (!currentInstructions.includes(workflowImport)) fs.appendFileSync(claudeFile, `\n${workflowImport}\n`);
 console.log(`CardGame profile: ${profile}`);

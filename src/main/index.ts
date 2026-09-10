@@ -2781,8 +2781,8 @@ async function spawnAgentCore(opts: AgentSpawnOptions, owner: Electron.WebConten
       // enterprise knowledge store (both no-ops / empty when their flags are off).
       opts.env = { ...(opts.env ?? {}), ...inj.env, ...memory.env(), ...knowledge.env() };
     } catch (e) {
-      // Hive provisioning is best-effort; never block a spawn on it.
       console.error('[hive] ensureAgent failed:', e);
+      return { ok: false, error: `Office registration failed: ${String(e)}` };
     }
   }
   // Long-run guardrails + tiering (Lane A #6.4/#6.6). All additive to the args
@@ -4569,6 +4569,7 @@ completionWatcher.start();
  *  these directly; `objective` and `cwd` are the only required fields. */
 interface SpawnRequest {
   id?: string;
+  taskId?: string;                                    // existing native office card
   objective?: string;
   command?: string;                                   // engine CLI; default = config.defaultCommand
   provider?: AgentProvider;                           // optional explicit provider
@@ -4679,6 +4680,11 @@ async function processSpawnRequest(filePath: string): Promise<void> {
 
   const objective = typeof raw.objective === 'string' ? raw.objective.trim() : '';
   if (!objective) { fail('missing "objective"'); return; }
+  const taskId = typeof raw.taskId === 'string' ? raw.taskId.trim() : undefined;
+  if (raw.taskId !== undefined) {
+    const task = (hive.tasks() as { tasks?: HiveTask[] }).tasks?.find(t => t.id === taskId);
+    if (!task || task.status !== 'todo') { fail('taskId must identify an existing todo task'); return; }
+  }
 
   const reqId = (typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : basename(filePath).replace(/\.json$/i, ''))
     .replace(/[^A-Za-z0-9._-]/g, '-');
@@ -4752,6 +4758,12 @@ async function processSpawnRequest(filePath: string): Promise<void> {
     res = { ok: false, error: String(e) };
   }
   if (!res.ok) { integrationBroker.revoke(workerId); fail(`spawn failed — ${res.error ?? 'unknown error'}`); return; }
+  if (taskId && !hive.patchTask(taskId, { assignee: workerId, status: 'doing' })) {
+    ptyManager.kill(workerId);
+    teardownPty(workerId);
+    fail('task disappeared during spawn');
+    return;
+  }
 
   // A god-hired worker is a MAIN-initiated spawn, so the renderer would never
   // card it on its own (same reason as the voice-spawn broadcast): without this
@@ -4790,7 +4802,8 @@ async function processSpawnRequest(filePath: string): Promise<void> {
       ? buildAutonomousRequestProtocol(slack.channel, slack.thread_ts, slackReplyScriptPath())
       : '[AUTONOMOUS WORKER TASK — no interactive human is watching. Work autonomously; do not ask interactive questions.] The task starts now: ';
     const suffix = `\n\n[CAPABILITIES] Before you start, consult your capability catalog — run the \`/capabilities\` skill (or read \`$AGENT_DIR/.claude/skills/capabilities/SKILL.md\`). It lists your temporal date-range skills (\`/today\`, \`/last30Days\`, \`/lastQuarter\`, …) and the integrations available to you (reached via the loopback broker) and how to call each. For any time-scoped work, resolve the dates with those skills instead of computing them by hand.\n\n[WORKER COMPLETION] When finished, signal done by sending ONE outbox message to god with "act":"done" and a short result summary — that releases this ephemeral worker (terminal closed; your branch is handed to god). Do NOT push to any remote; god is the sole integrator.`;
-    hive.send({ to: workerId, conversation: `worker-${reqId}`, act: 'request', subject: meta.name, body: `${prefix}${objective}${suffix}` }, 'god');
+    const taskContext = taskId ? `\n[OFFICE TASK ${taskId}] You are assigned to this existing task. Keep its ID. Record progress on this card. If blocked on human input, set status blocked and append {q, askedAt} to humanQA; do not guess the answer. A done worker message is a handoff to Michael, not verification or merge approval.\n` : '';
+    hive.send({ to: workerId, conversation: `worker-${reqId}`, act: 'request', subject: meta.name, body: `${prefix}${taskContext}${objective}${suffix}` }, 'god');
   } catch (e) {
     console.error('[worker] dispatch send failed:', e);
   }

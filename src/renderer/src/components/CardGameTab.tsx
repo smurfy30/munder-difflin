@@ -1,117 +1,86 @@
-import { useEffect, useRef, useState } from 'react';
-import type { LanesSnapshot, LanesTask } from '@shared/lanes';
+import { useEffect, useState } from 'react';
+import { useStore } from '@/store/store';
 import { PixelButton } from './PixelButton';
+import { TasksKanban, parseTasks, waitsOnHuman, type HiveTask } from './TasksKanban';
+import { LegacyLanesTab } from './LegacyLanesTab';
 
-const DRAFT_KEY = 'munder-cardgame-draft';
-function savedDraft() {
+const KEY = 'cardgame-native-intake-v1';
+function readDraft(): Record<string, string> {
   try {
-    const value = JSON.parse(localStorage.getItem(DRAFT_KEY) || '{}');
-    return value && typeof value === 'object' ? value as Record<string, string> : {};
+    const raw = JSON.parse(localStorage.getItem(KEY) || '{}');
+    return Object.fromEntries(Object.entries(raw || {}).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
   } catch { return {}; }
 }
 
+/** The same employees, task ledger and human questions as the native office. */
 export function CardGameTab() {
-  const [data, setData] = useState<LanesSnapshot>();
+  const agents = useStore(s => s.agents);
+  const select = useStore(s => s.select);
+  const openTask = useStore(s => s.openTaskDetail);
+  const [initial] = useState(readDraft);
+  const [id, setId] = useState(initial.id || `cardgame-${crypto.randomUUID()}`);
+  const [title, setTitle] = useState(initial.title || '');
+  const [brief, setBrief] = useState(initial.brief || '');
+  const [kind, setKind] = useState(initial.kind || 'Task');
+  const [tasks, setTasks] = useState<HiveTask[]>([]);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [history, setHistory] = useState(false);
-  const [saved] = useState(savedDraft);
-  const [title, setTitle] = useState(typeof saved.title === 'string' ? saved.title : '');
-  const [brief, setBrief] = useState(typeof saved.brief === 'string' ? saved.brief : '');
-  const [scope, setScope] = useState(typeof saved.scope === 'string' ? saved.scope : '');
-  const [workflow, setWorkflow] = useState(['standard', 'bugfix', 'spike', 'mechanical'].includes(saved.workflow) ? saved.workflow : 'standard');
-  const [saving, setSaving] = useState(false);
-  const [draftError, setDraftError] = useState('');
   const [notice, setNotice] = useState('');
-  const requestKey = useRef(saved.key || crypto.randomUUID());
-  const lastRequest = useRef(saved.request || '');
+  const [saving, setSaving] = useState(false);
+  const [legacy, setLegacy] = useState(false);
   useEffect(() => {
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ title, brief, scope, workflow, key: requestKey.current, request: lastRequest.current })); }
-    catch { /* Draft saving to Lanes still works when local storage is unavailable. */ }
-  }, [title, brief, scope, workflow]);
-  const alive = useRef(true);
-  const inFlight = useRef(false);
-  const refresh = async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setBusy(true);
-    try {
-      const result = await window.cth.lanesSnapshot();
-      if (!alive.current) return;
-      if (result.ok) { setData(result.snapshot); setError(''); }
-      else { setError(result.error); setData(undefined); }
-    } catch (e) { if (alive.current) { setError(String(e)); setData(undefined); } }
-    finally { inFlight.current = false; if (alive.current) setBusy(false); }
-  };
+    try { localStorage.setItem(KEY, JSON.stringify({ id, title, brief, kind })); } catch { /* optional draft recovery */ }
+  }, [id, title, brief, kind]);
   useEffect(() => {
-    alive.current = true;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const next = parseTasks(await window.cth.hiveTasks());
+        if (active) setTasks(next);
+      } catch { if (active) setError('The office task ledger is unavailable.'); }
+    };
     void refresh();
-    const timer = setInterval(() => { if (!document.hidden) void refresh(); }, 30000);
-    return () => { alive.current = false; clearInterval(timer); };
+    const timer = setInterval(refresh, 5000);
+    return () => { active = false; clearInterval(timer); };
   }, []);
-  const runs = data?.runs.filter(r => history || !['done', 'archived'].includes(r.status)) || [];
-  const createDraft = async () => {
-    setSaving(true); setDraftError(''); setNotice('');
+  const save = async () => {
+    if (saving) return;
+    setSaving(true); setError(''); setNotice('');
     try {
-      const fingerprint = JSON.stringify({ title, brief, scope, workflow });
-      if (lastRequest.current && lastRequest.current !== fingerprint) requestKey.current = crypto.randomUUID();
-      lastRequest.current = fingerprint;
-      try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ title, brief, scope, workflow, key: requestKey.current, request: fingerprint })); } catch { /* Storage may be unavailable. */ }
-      const result = await window.cth.lanesCreateDraft({ key: requestKey.current, title, brief,
-        owns: scope.split('\n').map(p => p.trim()).filter(Boolean), workflow });
-      if (!result.ok) { setDraftError(result.error); return; }
-      requestKey.current = crypto.randomUUID();
-      lastRequest.current = '';
-      setTitle(''); setBrief(''); setScope('');
-      setNotice('Draft saved in Lanes. No worker started.');
-      await refresh();
-    } catch (e) { setDraftError(String(e)); }
+      const card: HiveTask = { id, title: `[${kind}] ${title.trim()}`, description: brief.trim(),
+        status: 'todo', dependsOn: [], priority: 2, createdAt: new Date().toISOString() };
+      const result = await window.cth.hiveAddTask(card);
+      const latest = parseTasks(await window.cth.hiveTasks());
+      const saved = latest.find(t => t.id === id);
+      if (!saved || saved.title !== card.title || saved.description !== card.description) {
+        throw new Error(result.error || 'Task could not be saved. Your draft is preserved.');
+      }
+      setTasks(latest); setTitle(''); setBrief(''); setId(`cardgame-${crypto.randomUUID()}`);
+      setNotice('Saved on the office board. Assign the task to Michael when ready.');
+      openTask(id);
+    } catch (e) { setError(String(e)); }
     finally { setSaving(false); }
   };
-  return <div style={{ overflowY: 'auto', padding: 12, fontSize: 12, color: 'var(--cth-ink-900)' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-      <strong>CardGame development</strong>
-      <PixelButton size="sm" disabled={busy} onClick={() => void refresh()}>{busy ? 'reading…' : 'refresh'}</PixelButton>
+  return <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', color: 'var(--cth-ink-900)' }}>
+    <div style={{ padding: 12, fontSize: 12 }}>
+      <strong>CardGame office</strong>
+      <p>Capture work here. Assign it to Michael from the task details. Employees work on the floor; questions appear in Ask Me.</p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {agents.filter(a => a.ptyId).map(a => <button key={a.id} className="cth-input" onClick={() => select(a.id)}>
+          {a.name} · {a.status}<br />{tasks.filter(t => t.assignee === a.id && t.status === 'doing').map(t => t.title).join(', ') || a.action || 'No active task'}
+        </button>)}
+      </div>
+      {!agents.some(a => a.ptyId && !a.isGod && !a.isAssistant) && <p>No employee workers are running. Assigned workers appear here and on the office floor.</p>}
+      {tasks.filter(waitsOnHuman).map(t => <p key={t.id}><button className="cth-input" onClick={() => openTask(t.id)}>Needs your input: {t.title}</button></p>)}
+      <details><summary>New task or bug</summary>
+        <label>Type<select aria-label="Work type" value={kind} onChange={e => setKind(e.target.value)} disabled={saving}>{['Task', 'Bug', 'Investigation'].map(k => <option key={k}>{k}</option>)}</select></label>
+        <label>Title<input className="cth-input" aria-label="Work title" value={title} maxLength={280} onChange={e => setTitle(e.target.value)} disabled={saving} style={{ width: '100%' }} /></label>
+        <label>What should happen?<textarea className="cth-input" aria-label="Work description" value={brief} maxLength={18000} onChange={e => setBrief(e.target.value)} disabled={saving} placeholder="Describe the outcome, or the bug and how to reproduce it." style={{ width: '100%', minHeight: 100 }} /></label>
+        <PixelButton size="sm" onClick={() => void save()} disabled={saving || !title.trim() || !brief.trim()}>{saving ? 'saving…' : 'create office task'}</PixelButton>
+      </details>
+      {notice && <p role="status">{notice}</p>}
+      {error && <p role="alert">{error}</p>}
     </div>
-    <p>Work recorded in Lanes. Verification, review acceptance, and merge remain separate.</p>
-    <details><summary>New development task</summary>
-      <p>Capture a draft for review before dispatch. Use repository-relative paths for the intended scope.</p>
-      <label>Title<input className="cth-input" aria-label="Task title" value={title} disabled={saving} maxLength={300} onChange={e => setTitle(e.target.value)} style={{ width: '100%' }} /></label>
-      <label>Brief<textarea className="cth-input" aria-label="Task brief" value={brief} disabled={saving} maxLength={20000} onChange={e => setBrief(e.target.value)} style={{ width: '100%', minHeight: 90 }} /></label>
-      <label>Scope, one path per line<textarea className="cth-input" aria-label="Task scope" value={scope} disabled={saving} onChange={e => setScope(e.target.value)} style={{ width: '100%' }} /></label>
-      <label>Workflow<select aria-label="Task workflow" value={workflow} disabled={saving} onChange={e => setWorkflow(e.target.value)}>{['standard', 'bugfix', 'spike', 'mechanical'].map(w => <option key={w}>{w}</option>)}</select></label>
-      <p><PixelButton size="sm" disabled={saving || !data || !title.trim() || !brief.trim()} onClick={() => void createDraft()}>{saving ? 'saving…' : 'save draft'}</PixelButton></p>
-      {draftError && <p role="alert">{draftError} Retry keeps the same request key.</p>}
-    </details>
-    {notice && <p role="status">{notice}</p>}
-    {error && <p role="alert" style={{ whiteSpace: 'pre-wrap' }}>Cannot read Lanes: {error}<br />Worker availability is unknown. Retry before starting overlapping work.</p>}
-    {data && <>
-      <p style={{ overflowWrap: 'anywhere' }}>{data.project.root}<br />{data.source}<br />Read: {new Date(data.at).toLocaleTimeString()} · Ledger updated: {new Date(data.ledgerUpdatedAt).toLocaleString()}</p>
-      <label><input type="checkbox" checked={history} onChange={e => setHistory(e.target.checked)} /> Include completed and archived runs</label>
-      <p>{runs.length} runs shown · {data.lanes.filter(l => l.status === 'running').length} workers recorded as running</p>
-      {runs.length === 0 && <p>No matching runs. This is not proof that no processes are running.</p>}
-      {runs.map(run => <section key={run.id} style={{ marginTop: 12, padding: 10, background: 'var(--cth-paper-100)', border: '1px solid var(--cth-ink-300)' }}>
-        <strong>{run.title}</strong><p>{run.status} · <code>{run.id}</code></p>
-        {run.decisions.filter(d => !d.answer).map(d => <p key={d.id}>Needs a decision: {d.question}</p>)}
-        {run.tasks.map(task => <Task key={task.id} task={task} data={data} />)}
-      </section>)}
-      <details style={{ marginTop: 12 }}><summary>Resource leases (all projects)</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(data.leases, null, 2)}</pre></details>
-    </>}
+    <div style={{ minHeight: 330, flex: 1 }}><TasksKanban /></div>
+    <details style={{ padding: 12 }} onToggle={e => setLegacy(e.currentTarget.open)}><summary>Legacy Lanes records</summary>{legacy && <LegacyLanesTab />}</details>
   </div>;
-}
-
-function Task({ task, data }: { task: LanesTask; data: LanesSnapshot }) {
-  const workers = data.lanes.filter(l => task.laneIds?.includes(l.id));
-  const review = task.reviews?.at(-1);
-  return <details style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--cth-ink-300)', overflowWrap: 'anywhere' }}>
-    <summary>{task.title} — {task.stage} ({task.status})</summary>
-    <p>{task.brief}</p>
-    <p>Workflow: {task.workflow}<br />Owns: {task.owns.join(', ') || 'No scope recorded'}</p>
-    <p>Verification evidence: {task.evidence || 'Not recorded'}</p>
-    <p>Review: {review ? `${review.decision}: ${review.evidence || review.note}` : 'Not recorded'}</p>
-    <p>Merge: {task.merge ? `${task.merge.commit} → ${task.merge.target}` : 'Not recorded'}</p>
-    {task.note && <p>{task.note}</p>}
-    {task.transitions.map(t => <p key={t.to}>{t.label}: {t.allowed ? 'Recorded prerequisites satisfied; no transition requested' : `Blocked by ${t.blockedBy.join(', ')}`}</p>)}
-    {workers.map(w => <p key={w.id}><strong>{w.provider} · {w.model}</strong><br />{w.status} · Exit: {w.exitCode ?? 'not recorded'}<br />Branch: {w.branch || 'not recorded'}<br />Worktree: {w.worktree || 'not recorded'}<br />Log: {w.logFile}</p>)}
-  </details>;
 }

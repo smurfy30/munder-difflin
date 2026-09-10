@@ -566,7 +566,7 @@ function FloorTab({ seed }: { seed: { text: string; seq: number } }) {
       { to: 'god', act: 'request', subject: t('commandCenter.taskFromHuman'), body: full },
       'human'
     );
-    setDispatchText('');
+    if (res.ok) setDispatchText('');
     setDispatchMsg(res.ok
       ? suggested
         ? t('commandCenter.sentToWithSuggestion', { godName, name: suggested.name })

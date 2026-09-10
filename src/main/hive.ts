@@ -27,6 +27,7 @@ import { join, dirname, basename, isAbsolute, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, createHash } from 'node:crypto';
+import { writeRecoverableJson, readRecoverableJson } from './recoverableJson';
 import type { AgentUsageSample } from './usage';
 import { COMMAND_GROUPS } from '../shared/claudeCommands';
 import {
@@ -2649,15 +2650,13 @@ export class HiveManager {
 
   // — json + atomic io —
   private readJson<T>(p: string, fallback: T): T {
-    try { return JSON.parse(readFileSync(p, 'utf8')) as T; } catch { return fallback; }
+    return readRecoverableJson(p, fallback);
   }
   private writeJson(p: string, data: unknown): void {
     writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
   }
   private atomicWriteJson(p: string, data: unknown): void {
-    const tmp = `${p}.tmp-${shortRand()}`;
-    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
-    renameSync(tmp, p);
+    writeRecoverableJson(p, data);
   }
 
   // — git (single committer, retry + stale-lock recovery) —
